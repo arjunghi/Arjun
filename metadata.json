@@ -1,0 +1,6 @@
+{
+  "name": "Comprehensive Student Management System",
+  "description": "A centralized student management and progress report system for Grades 1-10 with secure teacher logins, student dashboards, automated reporting with Gemini API, and end-to-end data encryption.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
