@@ -129,7 +129,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
     try {
       setTeacherChangesLoading(true);
       const res = await fetch('/api/teachers');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
         const data = await res.json();
         setTeachersList(data);
       }
@@ -144,7 +145,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
     try {
       setAuditLogsLoading(true);
       const res = await fetch('/api/audit-logs');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
         const data = await res.json();
         setAuditLogsList(data);
       }
@@ -282,7 +284,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const fetchAssessments = async () => {
     try {
       const res = await fetch('/api/assessments');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
         const data = await res.json();
         setAssessments(data);
       }
@@ -294,7 +297,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const fetchWeights = async () => {
     try {
       const res = await fetch('/api/weights');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
         const data = await res.json();
         setWeights(data);
         if (data[selectedSubject]) {
@@ -312,7 +316,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
     try {
       setCalendarLoading(true);
       const res = await fetch('/api/calendar');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
         const data = await res.json();
         setCalendarData(data);
       }

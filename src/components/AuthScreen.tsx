@@ -38,6 +38,11 @@ export default function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
         })
       });
 
+      const contentType = resp.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Educational server is booting up or refreshing setup logs. Please wait 5-10 seconds and try again.');
+      }
+
       const data = await resp.json();
       if (!resp.ok) {
         throw new Error(data.error || 'Check your credentials and try again.');
@@ -66,7 +71,13 @@ export default function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
     setLoading(true);
     // Call server to fetch students list and crosscheck
     fetch('/api/students')
-      .then(res => res.json())
+      .then(async res => {
+        const contentType = res.headers.get('content-type');
+        if (!res.ok || !contentType || !contentType.includes('application/json')) {
+          throw new Error('Educational server is booting up or refreshing student registers. Please wait 5-10 seconds and try again.');
+        }
+        return res.json();
+      })
       .then((students: any[]) => {
         setLoading(false);
         const match = students.find(
@@ -84,7 +95,7 @@ export default function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
       })
       .catch(err => {
         setLoading(false);
-        setError('Server authentication error. Please try again.');
+        setError(err.message || 'Server authentication error or restart delay. Please try again in 5 seconds.');
       });
   };
 

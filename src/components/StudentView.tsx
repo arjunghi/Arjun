@@ -31,30 +31,38 @@ export default function StudentView({ studentData, onLogout }: StudentViewProps)
 
   // Fetch announcements, chats and calendar
   useEffect(() => {
+    const safeJson = (res: Response) => {
+      const contentType = res.headers.get('content-type');
+      if (!res.ok || !contentType || !contentType.includes('application/json')) {
+        throw new Error('Invalid response content-type or status.');
+      }
+      return res.json();
+    };
+
     fetch('/api/announcements')
-      .then(res => res.json())
+      .then(safeJson)
       .then(data => setAnnouncements(data))
-      .catch(err => console.error(err));
+      .catch(err => console.warn('Announcements fetch deferred:', err.message));
 
     fetch(`/api/chat/${studentData.id}`)
-      .then(res => res.json())
+      .then(safeJson)
       .then(data => setMessages(data))
-      .catch(err => console.error(err));
+      .catch(err => console.warn('Chat fetch deferred:', err.message));
 
     fetch('/api/calendar')
-      .then(res => res.json())
+      .then(safeJson)
       .then(data => setCalendarData(data))
-      .catch(err => console.error(err));
+      .catch(err => console.warn('Calendar fetch deferred:', err.message));
 
     fetch('/api/assessments')
-      .then(res => res.json())
+      .then(safeJson)
       .then(data => setAssessments(data))
-      .catch(err => console.error(err));
+      .catch(err => console.warn('Assessments fetch deferred:', err.message));
 
     fetch('/api/weights')
-      .then(res => res.json())
+      .then(safeJson)
       .then(data => setWeights(data))
-      .catch(err => console.error(err));
+      .catch(err => console.warn('Weights fetch deferred:', err.message));
   }, [studentData.id]);
 
   // Handle Parent sending message via Cryptographic E2E Simulator
