@@ -4,7 +4,7 @@ import {
   Users, BookOpen, GraduationCap, Sparkles, Send, CheckCircle2, 
   HelpCircle, RefreshCw, AlertCircle, FileSpreadsheet, Plus, Trash2, LogOut, ChevronRight,
   ShieldCheck, Settings, Layers, PlusCircle, Sparkle, Calendar, FileText, Printer, Download, Clipboard,
-  Link, Link2, Share2, Globe, FileUp, Sparkle as Sparkicon, Loader2
+  Link, Link2, Share2, Globe, FileUp, Sparkle as Sparkicon, Loader2, Key
 } from 'lucide-react';
 import { Student, SubjectGrade, Announcement, Assessment } from '../types';
 import { initAuth, googleSignIn, googleLogout } from '../lib/firebaseAuth';
@@ -36,6 +36,39 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const [selectedSection, setSelectedSection] = useState<string>('all');
   const [selectedSubject, setSelectedSubject] = useState<string>('English');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+
+  // Bulk Enrollment
+  const [isBulkEnroll, setIsBulkEnroll] = useState(false);
+  const [bulkEnrollText, setBulkEnrollText] = useState('');
+
+  // Teachers Management States
+  const [teachersList, setTeachersList] = useState<any[]>([]);
+  const [teacherEmailInput, setTeacherEmailInput] = useState('');
+  const [teacherNameInput, setTeacherNameInput] = useState('');
+  const [teacherPasswordInput, setTeacherPasswordInput] = useState('');
+  const [teacherAllowedGrades, setTeacherAllowedGrades] = useState<number[]>([1]);
+  const [isEditingTeacher, setIsEditingTeacher] = useState<boolean>(false);
+  const [teacherChangesLoading, setTeacherChangesLoading] = useState(false);
+
+  // Security Audit Log States
+  const [auditLogsList, setAuditLogsList] = useState<any[]>([]);
+  const [auditLogsLoading, setAuditLogsLoading] = useState(false);
+
+  // Admin Password States
+  const [currentAdminPassInput, setCurrentAdminPassInput] = useState('');
+  const [newAdminPassInput, setNewAdminPassInput] = useState('');
+  const [adminPassMessage, setAdminPassMessage] = useState('');
+  const [adminPassError, setAdminPassError] = useState('');
+
+  // Access constraints helper
+  const availableGrades = teacherData.allowedGrades || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+  // Auto focus first accessible grade
+  React.useEffect(() => {
+    if (availableGrades.length > 0 && !availableGrades.includes(selectedGrade)) {
+      setSelectedGrade(availableGrades[0]);
+    }
+  }, [teacherData]);
 
   // CDC state variables
   const [assessments, setAssessments] = useState<Assessment[]>([]);
@@ -91,6 +124,160 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
       if (unsubscribe) unsubscribe();
     };
   }, []);
+
+  const fetchTeachers = async () => {
+    try {
+      setTeacherChangesLoading(true);
+      const res = await fetch('/api/teachers');
+      if (res.ok) {
+        const data = await res.json();
+        setTeachersList(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTeacherChangesLoading(false);
+    }
+  };
+
+  const fetchAuditLogs = async () => {
+    try {
+      setAuditLogsLoading(true);
+      const res = await fetch('/api/audit-logs');
+      if (res.ok) {
+        const data = await res.json();
+        setAuditLogsList(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAuditLogsLoading(false);
+    }
+  };
+
+  const handleSaveTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teacherEmailInput.trim()) return;
+
+    try {
+      setTeacherChangesLoading(true);
+      const res = await fetch('/api/teachers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': teacherData.email
+        },
+        body: JSON.stringify({
+          email: teacherEmailInput.trim(),
+          name: teacherNameInput.trim(),
+          password: teacherPasswordInput.trim() || undefined,
+          allowedGrades: teacherAllowedGrades
+        })
+      });
+
+      if (res.ok) {
+        setAdminSuccess(`Successfully configured educator permission matrix for ${teacherEmailInput}!`);
+        setTeacherEmailInput('');
+        setTeacherNameInput('');
+        setTeacherPasswordInput('');
+        setTeacherAllowedGrades([1]);
+        setIsEditingTeacher(false);
+        fetchTeachers();
+      } else {
+        const data = await res.json();
+        setAdminError(data.error || 'Failed to update teacher configuration.');
+      }
+    } catch (err) {
+      setAdminError('Network error updating teacher registry.');
+    } finally {
+      setTeacherChangesLoading(false);
+    }
+  };
+
+  const handleDeleteTeacher = async (emailToDelete: string) => {
+    if (!confirm(`Are you absolutely sure you want to completely remove educator account ${emailToDelete}?`)) return;
+
+    try {
+      setTeacherChangesLoading(true);
+      const res = await fetch(`/api/teachers/${encodeURIComponent(emailToDelete)}`, {
+        method: 'DELETE',
+        headers: {
+          'x-user-email': teacherData.email
+        }
+      });
+
+      if (res.ok) {
+        setAdminSuccess(`Educator account ${emailToDelete} removed.`);
+        fetchTeachers();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTeacherChangesLoading(false);
+    }
+  };
+
+  const handleToggleBlockTeacher = async (teacher: any) => {
+    try {
+      setTeacherChangesLoading(true);
+      const res = await fetch('/api/teachers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': teacherData.email
+        },
+        body: JSON.stringify({
+          email: teacher.email,
+          isBlocked: !teacher.isBlocked
+        })
+      });
+
+      if (res.ok) {
+        setAdminSuccess(`Blocked status for ${teacher.email} toggled successfully!`);
+        fetchTeachers();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTeacherChangesLoading(false);
+    }
+  };
+
+  const handleChangeAdminPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminPassError('');
+    setAdminPassMessage('');
+
+    if (!currentAdminPassInput || !newAdminPassInput) {
+      setAdminPassError('Please provide both current and new security passwords.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/auth/admin-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': teacherData.email
+        },
+        body: JSON.stringify({
+          currentPassword: currentAdminPassInput,
+          newPassword: newAdminPassInput
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setAdminPassMessage('Administrative password updated successfully!');
+        setCurrentAdminPassInput('');
+        setNewAdminPassInput('');
+      } else {
+        setAdminPassError(data.error || 'Failed to update administrative password.');
+      }
+    } catch (err) {
+      setAdminPassError('Network error checking administrator credentials.');
+    }
+  };
 
   const fetchAssessments = async () => {
     try {
@@ -585,8 +772,16 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const [annSuccess, setAnnSuccess] = useState(false);
 
   // Admin Portal state structures
-  const [adminSubTab, setAdminSubTab] = useState<'students' | 'subjects' | 'overview'>('students');
+  const [adminSubTab, setAdminSubTab] = useState<'students' | 'subjects' | 'overview' | 'teachers' | 'logs'>('students');
   const [adminSelectGrade, setAdminSelectGrade] = useState<number>(1);
+
+  React.useEffect(() => {
+    if (adminSubTab === 'teachers') {
+      fetchTeachers();
+    } else if (adminSubTab === 'logs') {
+      fetchAuditLogs();
+    }
+  }, [adminSubTab]);
   
   // Student Creation
   const [newStudentName, setNewStudentName] = useState('');
@@ -806,6 +1001,68 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
       setNewStudentPin('');
     } catch (err) {
       setAdminError('Failed to synchronize and save new student data.');
+    }
+  };
+
+  // Bulk Student Creation
+  const handleBulkCreateStudents = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError('');
+    setAdminSuccess('');
+
+    if (!bulkEnrollText.trim()) {
+      setAdminError('Please provide a list of student names.');
+      return;
+    }
+
+    const lines = bulkEnrollText.split('\n');
+    const gradeStudents = students.filter(s => s.grade === adminSelectGrade);
+    let currentMaxSn = gradeStudents.length > 0 ? Math.max(...gradeStudents.map(s => s.sn)) : 0;
+    
+    const defaultGrades = getExistingClassSubjects(adminSelectGrade);
+    const newStudents: Student[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      
+      const parts = trimmed.split(',');
+      const name = parts[0]?.trim();
+      if (!name) continue;
+      
+      currentMaxSn++;
+      const nextSn = currentMaxSn;
+      const newId = `G${adminSelectGrade}-S${nextSn}`;
+      
+      const section = parts[1]?.trim() || newStudentSection.trim() || (adminSelectGrade === 1 ? 'Butterfly' : 'Redwoods');
+      const pin = parts[2]?.trim() || Math.floor(1001 + Math.random() * 8999).toString();
+      
+      newStudents.push({
+        id: newId,
+        sn: nextSn,
+        name: name,
+        grade: adminSelectGrade,
+        section: section,
+        grades: defaultGrades,
+        parentPin: pin,
+        teacherRemarks: 'Admitted in bulk via Academic Administrative Desk.',
+        aiComment: 'Awaiting first evaluation records.'
+      });
+    }
+
+    if (newStudents.length === 0) {
+      setAdminError('No valid student names detected.');
+      return;
+    }
+
+    const updated = [...students, ...newStudents];
+    try {
+      await onUpdateStudents(updated);
+      setAdminSuccess(`Successfully enrolled ${newStudents.length} students in Grade ${adminSelectGrade}!`);
+      setBulkEnrollText('');
+      setIsBulkEnroll(false);
+    } catch (err) {
+      setAdminError('Failed to synchronize and save bulk student data.');
     }
   };
 
@@ -1160,7 +1417,7 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                 }}
                 className="bg-slate-50 border border-slate-200 text-xs text-slate-800 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 font-semibold"
               >
-                {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                {availableGrades.map((n: number) => (
                   <option key={n} value={n}>Grade {n}</option>
                 ))}
               </select>
@@ -1568,7 +1825,7 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                           }}
                           className="bg-white border border-slate-200 text-xs text-slate-800 rounded-lg p-2 focus:outline-none focus:border-indigo-500 font-semibold"
                         >
-                          {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                          {availableGrades.map((n: number) => (
                             <option key={n} value={n}>Grade {n}</option>
                           ))}
                         </select>
@@ -2537,7 +2794,7 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                   </p>
                 </div>
                 
-                <div id="admin-subtab-controls" className="flex gap-1 bg-slate-100 p-1 rounded-xl flex-shrink-0">
+                <div id="admin-subtab-controls" className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-xl flex-shrink-0">
                   <button
                     id="btn-subtab-students"
                     onClick={() => { setAdminSubTab('students'); setAdminSuccess(''); setAdminError(''); }}
@@ -2555,6 +2812,24 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                     }`}
                   >
                     Class Subjects
+                  </button>
+                  <button
+                    id="btn-subtab-teachers"
+                    onClick={() => { setAdminSubTab('teachers'); setAdminSuccess(''); setAdminError(''); }}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                      adminSubTab === 'teachers' ? 'bg-white text-slate-950 shadow-sm border border-slate-200/40' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Educators Permissions Matrix
+                  </button>
+                  <button
+                    id="btn-subtab-logs"
+                    onClick={() => { setAdminSubTab('logs'); setAdminSuccess(''); setAdminError(''); }}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                      adminSubTab === 'logs' ? 'bg-white text-slate-950 shadow-sm border border-slate-200/40' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Security Audit Trail
                   </button>
                   <button
                     id="btn-subtab-overview"
@@ -2768,41 +3043,108 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                     ) : (
                       /* New Admission Card */
                       <div id="new-admission-card" className="bg-white border border-slate-200 p-4 sm:p-5 rounded-2xl shadow-sm space-y-4">
-                        <div className="pb-2 border-b border-slate-100">
+                        <div className="flex justify-between items-center pb-2 border-b border-slate-100">
                           <h4 className="text-xs font-extrabold font-mono tracking-wider text-indigo-700 uppercase flex items-center gap-1.5">
                             <PlusCircle className="w-4 h-4" />
-                            Enrollment Registration Desk
+                            Enrollment Desk
                           </h4>
+                          <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                            <button
+                              type="button"
+                              onClick={() => { setIsBulkEnroll(false); setAdminError(''); setAdminSuccess(''); }}
+                              className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${!isBulkEnroll ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}
+                            >
+                              Single Student
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setIsBulkEnroll(true); setAdminError(''); setAdminSuccess(''); }}
+                              className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${isBulkEnroll ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}
+                            >
+                              Bulk Register
+                            </button>
+                          </div>
                         </div>
 
-                        <form onSubmit={handleCreateStudent} className="space-y-3.5 text-xs">
-                          <div>
-                            <label className="block text-slate-500 font-mono font-bold mb-1">Full Legal Name</label>
-                            <input
-                              type="text"
-                              value={newStudentName}
-                              onChange={(e) => setNewStudentName(e.target.value)}
-                              placeholder="e.g. Priyanshu Sharma"
-                              required
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 font-semibold focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-100"
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2.5">
+                        {!isBulkEnroll ? (
+                          <form onSubmit={handleCreateStudent} className="space-y-3.5 text-xs">
                             <div>
-                              <label className="block text-slate-500 font-mono font-bold mb-1">Cohort / Class</label>
+                              <label className="block text-slate-500 font-mono font-bold mb-1">Full Legal Name</label>
+                              <input
+                                type="text"
+                                value={newStudentName}
+                                onChange={(e) => setNewStudentName(e.target.value)}
+                                placeholder="e.g. Priyanshu Sharma"
+                                required
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 font-semibold focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-100"
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <div>
+                                <label className="block text-slate-500 font-mono font-bold mb-1">Cohort / Class</label>
+                                <select
+                                  value={adminSelectGrade}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value);
+                                    setAdminSelectGrade(val);
+                                    if (val === 1) {
+                                      setNewStudentSection('Butterfly');
+                                    } else {
+                                      setNewStudentSection('Redwoods');
+                                    }
+                                  }}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold focus:outline-none"
+                                >
+                                  {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                                    <option key={n} value={n}>Grade {n}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-slate-500 font-mono font-bold mb-1">Section</label>
+                                <input
+                                  type="text"
+                                  value={newStudentSection}
+                                  onChange={(e) => setNewStudentSection(e.target.value)}
+                                  placeholder="e.g. Redwoods, Orchid"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-805 font-semibold focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="flex justify-between mb-1">
+                                <label className="block text-slate-500 font-mono font-bold">Secure login PIN</label>
+                                <span className="text-[10px] text-slate-400 font-medium">Auto-generated if empty</span>
+                              </div>
+                              <input
+                                type="text"
+                                maxLength={4}
+                                value={newStudentPin}
+                                onChange={(e) => setNewStudentPin(e.target.value.replace(/\D/g, ''))}
+                                placeholder="e.g. 1001"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono tracking-widest text-slate-800 focus:outline-none"
+                              />
+                            </div>
+
+                            <button
+                              type="submit"
+                              className="w-full mt-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 px-4 shadow-md shadow-indigo-100 font-bold transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Plus className="w-4 h-4" />
+                              Register Student File
+                            </button>
+                          </form>
+                        ) : (
+                          <form onSubmit={handleBulkCreateStudents} className="space-y-3.5 text-xs">
+                            <div>
+                              <label className="block text-slate-500 font-mono font-bold mb-1">Bulk Class Level</label>
                               <select
                                 value={adminSelectGrade}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value);
-                                  setAdminSelectGrade(val);
-                                  if (val === 1) {
-                                    setNewStudentSection('Butterfly');
-                                  } else {
-                                    setNewStudentSection('Redwoods');
-                                  }
-                                }}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold focus:outline-none"
+                                onChange={(e) => setAdminSelectGrade(parseInt(e.target.value))}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-semibold text-slate-800 focus:outline-none"
                               >
                                 {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
                                   <option key={n} value={n}>Grade {n}</option>
@@ -2811,40 +3153,40 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                             </div>
 
                             <div>
-                              <label className="block text-slate-500 font-mono font-bold mb-1">Section</label>
+                              <label className="block text-slate-500 font-mono font-bold mb-1">Section Defaults</label>
                               <input
                                 type="text"
                                 value={newStudentSection}
                                 onChange={(e) => setNewStudentSection(e.target.value)}
-                                placeholder="e.g. Redwoods, Orchid"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-805 font-semibold focus:outline-none"
+                                placeholder="e.g. Butterfly, Redwoods"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-800 font-semibold focus:outline-none"
                               />
                             </div>
-                          </div>
 
-                          <div>
-                            <div className="flex justify-between mb-1">
-                              <label className="block text-slate-500 font-mono font-bold">Secure login PIN</label>
-                              <span className="text-[10px] text-slate-400 font-medium">Auto-generated if empty</span>
+                            <div>
+                              <div className="flex justify-between mb-1">
+                                <label className="block text-slate-500 font-mono font-bold">Pasted Student Registry List</label>
+                                <span className="text-[10px] text-slate-400 font-medium">One name per line</span>
+                              </div>
+                              <textarea
+                                value={bulkEnrollText}
+                                onChange={(e) => setBulkEnrollText(e.target.value)}
+                                rows={6}
+                                placeholder="Priyanshu Sharma&#10;Aarav Shrestha, Orchid, 1002&#10;Ram Bahadur Thapa"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 font-medium focus:outline-none focus:border-indigo-500 block h-28 resize-none font-mono"
+                              />
+                              <p className="text-[10px] text-slate-400 mt-1">Format: <b>Name, Section (optional), PIN (optional)</b>. Use one line per student.</p>
                             </div>
-                            <input
-                              type="text"
-                              maxLength={4}
-                              value={newStudentPin}
-                              onChange={(e) => setNewStudentPin(e.target.value.replace(/\D/g, ''))}
-                              placeholder="e.g. 1001"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono tracking-widest text-slate-800 focus:outline-none"
-                            />
-                          </div>
 
-                          <button
-                            type="submit"
-                            className="w-full mt-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 px-4 shadow-md shadow-indigo-100 font-bold transition-colors flex items-center justify-center gap-1.5"
-                          >
-                            <Plus className="w-4 h-4" />
-                            Register Student File
-                          </button>
-                        </form>
+                            <button
+                              type="submit"
+                              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2.5 px-4 shadow font-bold transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <Plus className="w-4 h-4" />
+                              Bulk Enroll Students
+                            </button>
+                          </form>
+                        )}
                       </div>
                     )}
                   </div>
@@ -3111,6 +3453,301 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {adminSubTab === 'teachers' && (
+                <div className="space-y-6">
+                  {/* Grid of Manage Educators & Admin Password */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Educator Setup Cards */}
+                    <div className="lg:col-span-1 space-y-6">
+                      <div id="educator-setup-card" className="bg-white border border-slate-200 p-4 sm:p-5 rounded-2xl shadow-sm space-y-4">
+                        <div className="pb-2 border-b border-slate-100 flex justify-between items-center">
+                          <h4 className="text-xs font-extrabold font-mono tracking-wider text-indigo-700 uppercase flex items-center gap-1.5">
+                            <PlusCircle className="w-4 h-4 text-indigo-650" />
+                            {isEditingTeacher ? 'Modify Educator Details' : 'Register New Educator'}
+                          </h4>
+                          {isEditingTeacher && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsEditingTeacher(false);
+                                setTeacherEmailInput('');
+                                setTeacherNameInput('');
+                                setTeacherPasswordInput('');
+                                setTeacherAllowedGrades([1]);
+                              }}
+                              className="text-[10px] text-amber-600 bg-amber-50 hover:bg-amber-100 font-bold px-2 py-0.5 rounded"
+                            >
+                              Cancel Edit
+                            </button>
+                          )}
+                        </div>
+
+                        <form onSubmit={handleSaveTeacher} className="space-y-3.5 text-xs">
+                          <div>
+                            <label className="block text-slate-500 font-mono font-bold mb-1">Academic Email Address</label>
+                            <input
+                              type="email"
+                              value={teacherEmailInput}
+                              onChange={(e) => setTeacherEmailInput(e.target.value)}
+                              placeholder="e.g. sita@rajarshigurukul.edu.np"
+                              required
+                              disabled={isEditingTeacher}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 font-semibold focus:outline-none disabled:opacity-60"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Unique institutional email required.</p>
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-500 font-mono font-bold mb-1">Full Legal Name</label>
+                            <input
+                              type="text"
+                              value={teacherNameInput}
+                              onChange={(e) => setTeacherNameInput(e.target.value)}
+                              placeholder="e.g. Sita Sharma"
+                              required
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 font-semibold focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-500 font-mono font-bold mb-1">
+                              {isEditingTeacher ? 'Update Password (optional)' : 'Access Password'}
+                            </label>
+                            <input
+                              type="text"
+                              value={teacherPasswordInput}
+                              onChange={(e) => setTeacherPasswordInput(e.target.value)}
+                              placeholder={isEditingTeacher ? 'Leave blank to preserve' : 'e.g. RG-Sita-2026'}
+                              required={!isEditingTeacher}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 font-semibold focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-500 font-mono font-bold mb-1">Allowed Grade Roster Access</label>
+                            <div className="grid grid-cols-5 gap-1.5 pt-1">
+                              {Array.from({ length: 10 }, (_, i) => i + 1).map(n => {
+                                const checked = teacherAllowedGrades.includes(n);
+                                return (
+                                  <label key={n} className={`cursor-pointer border rounded-lg p-1.5 text-center flex flex-col justify-center items-center transition-all ${checked ? 'bg-indigo-50 border-indigo-300 text-indigo-750 font-bold' : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'}`}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        if (checked) {
+                                          setTeacherAllowedGrades(teacherAllowedGrades.filter(g => g !== n));
+                                        } else {
+                                          setTeacherAllowedGrades([...teacherAllowedGrades, n].sort((a,b)=>a-b));
+                                        }
+                                      }}
+                                      className="sr-only"
+                                    />
+                                    <span className="text-[10px]">Gr {n}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <p className="text-[10px] text-slate-450 mt-1.5">Defines which class cohorts this teacher can enter progressive grades for.</p>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={teacherChangesLoading}
+                            className="w-full bg-indigo-650 hover:bg-indigo-750 text-white rounded-xl py-2.5 px-4 shadow font-bold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            {isEditingTeacher ? 'Save Educator Permissions' : 'Register Educator File'}
+                          </button>
+                        </form>
+                      </div>
+
+                      {/* Admin Password updates */}
+                      <div id="admin-password-card" className="bg-white border border-slate-200 p-4 sm:p-5 rounded-2xl shadow-sm space-y-4">
+                        <div className="pb-2 border-b border-slate-100">
+                          <h4 className="text-xs font-extrabold font-mono tracking-wider text-rose-700 uppercase flex items-center gap-1.5">
+                            <Key className="w-4 h-4 text-rose-600" />
+                            Alter Coordinator Password
+                          </h4>
+                        </div>
+                        
+                        <form onSubmit={handleChangeAdminPassword} className="space-y-3.5 text-xs">
+                          {adminPassMessage && (
+                            <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-[11px] font-bold">
+                              {adminPassMessage}
+                            </div>
+                          )}
+                          {adminPassError && (
+                            <div className="p-2.5 bg-rose-50 border border-rose-250 text-rose-800 rounded-lg text-[11px] font-bold">
+                              {adminPassError}
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block text-slate-500 font-mono font-bold mb-1">Current Coordinator Password</label>
+                            <input
+                              type="password"
+                              value={currentAdminPassInput}
+                              onChange={(e) => setCurrentAdminPassInput(e.target.value)}
+                              placeholder="••••••••••••"
+                              required
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-800 focus:outline-none focus:bg-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-500 font-mono font-bold mb-1">New Secure Password</label>
+                            <input
+                              type="text"
+                              value={newAdminPassInput}
+                              onChange={(e) => setNewAdminPassInput(e.target.value)}
+                              placeholder="e.g. RG-NewAdmin-2026"
+                              required
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-800 focus:outline-none focus:bg-white"
+                            />
+                          </div>
+
+                          <button
+                            type="submit"
+                            className="w-full bg-rose-650 hover:bg-rose-750 text-white rounded-xl py-2 px-4 shadow font-bold transition-all text-xs"
+                          >
+                            Update Security Password
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+
+                    {/* Educators list section */}
+                    <div className="lg:col-span-2 space-y-4">
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm">
+                        <div className="pb-2.5 border-b border-slate-100 flex justify-between items-center mb-4">
+                          <h4 className="text-xs font-extrabold font-mono tracking-wider text-slate-800 uppercase">
+                            Registered Educators &amp; Institutional Credentials
+                          </h4>
+                          <span className="text-[10px] bg-slate-100 text-slate-605 font-bold px-2.5 py-1 rounded">
+                            {teachersList.length} Active Accounts
+                          </span>
+                        </div>
+
+                        {teacherChangesLoading && teachersList.length === 0 ? (
+                          <div className="py-12 text-center text-slate-400 font-mono text-xs">Loading educational registers...</div>
+                        ) : (
+                          <div className="space-y-3.5 h-[500px] overflow-y-auto pr-1 text-xs">
+                            {teachersList.map((tea: any) => {
+                              return (
+                                <div key={tea.email} className="bg-slate-50/50 border border-slate-200/80 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 hover:bg-slate-50 transition-colors">
+                                  <div className="space-y-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-extrabold text-slate-850 text-sm">{tea.name}</span>
+                                      {tea.isBlocked && (
+                                        <span className="bg-rose-100 text-rose-700 text-[9px] font-black px-1.5 py-0.5 rounded uppercase font-mono tracking-wider">Blocked</span>
+                                      )}
+                                    </div>
+                                    <div className="space-y-1 font-mono text-[11px] text-slate-500">
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-slate-400 font-bold">Email:</span>
+                                        <span className="text-slate-700 font-semibold">{tea.email}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-slate-400 font-bold">Credential:</span>
+                                        <span className="text-slate-650 bg-white border px-1.5 py-0.5 rounded font-bold">{tea.password || '••••••••'}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1 flex-wrap">
+                                        <span className="text-slate-400 font-bold">Allowed Grades:</span>
+                                        <span className="text-indigo-700 font-bold">
+                                          {(tea.allowedGrades || []).map((g: number) => `Gr ${g}`).join(', ') || 'No rights assigned'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                                    <button
+                                      onClick={() => {
+                                        setIsEditingTeacher(true);
+                                        setTeacherEmailInput(tea.email);
+                                        setTeacherNameInput(tea.name);
+                                        setTeacherPasswordInput(tea.password || '');
+                                        setTeacherAllowedGrades(tea.allowedGrades || []);
+                                        setAdminSuccess(`Editing educator email ${tea.email}. Modify the left panel parameters setup.`);
+                                      }}
+                                      className="text-[10px] text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100/75 font-bold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                                    >
+                                      Edit Rights
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleBlockTeacher(tea)}
+                                      className={`text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors ${tea.isBlocked ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : 'text-amber-850 bg-amber-50 hover:bg-amber-100'}`}
+                                    >
+                                      {tea.isBlocked ? 'Activate' : 'Disable'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteTeacher(tea.email)}
+                                      className="text-[10px] text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100/70 font-bold px-2.5 py-1.5 rounded-lg transition-colors"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {adminSubTab === 'logs' && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+                  <div className="pb-2.5 border-b border-slate-100 flex justify-between items-center">
+                    <div className="space-y-0.5">
+                      <h4 className="text-xs font-extrabold font-mono tracking-wider text-indigo-700 uppercase flex items-center gap-1.5">
+                        Security Operational Logstream
+                      </h4>
+                      <p className="text-[11px] text-slate-500 font-semibold">Track real-time school administrative actions, progressive evaluation changes, and authentication logs.</p>
+                    </div>
+                    <button
+                      onClick={fetchAuditLogs}
+                      disabled={auditLogsLoading}
+                      className="text-[10.5px] font-bold bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
+                    >
+                      Refresh Logs
+                    </button>
+                  </div>
+
+                  {auditLogsLoading && auditLogsList.length === 0 ? (
+                    <div className="py-12 text-center text-slate-400 font-mono text-xs">Aligning change vectors...</div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto pr-1 text-xs font-semibold leading-relaxed">
+                      {auditLogsList.length === 0 ? (
+                        <div className="py-12 text-center text-slate-450 font-mono text-xs animate-pulse">No records have been populated within this current session sequence.</div>
+                      ) : (
+                        auditLogsList.map((log: any) => {
+                          return (
+                            <div key={log.id} className="py-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 hover:bg-slate-50/50 p-2 transition-colors rounded-lg">
+                              <div className="space-y-1">
+                                <div className="text-xs font-bold text-slate-800 leading-relaxed font-sans">{log.action}</div>
+                                <div className="flex items-center gap-2 text-[10.5px] text-slate-400 font-mono">
+                                  <span className="font-bold text-slate-500">{log.user}</span>
+                                  <span>•</span>
+                                  <span>ID: {log.id}</span>
+                                </div>
+                              </div>
+                              <span className="text-[10.5px] text-slate-400 font-mono uppercase bg-slate-50 border px-2 py-0.5 rounded flex-shrink-0 font-bold">
+                                {log.timestamp}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

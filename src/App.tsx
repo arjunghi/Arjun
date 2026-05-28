@@ -49,7 +49,10 @@ export default function App() {
     try {
       await fetch('/api/students', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': session ? session.payload.email : 'System'
+        },
         body: JSON.stringify(updatedList)
       });
     } catch (err) {

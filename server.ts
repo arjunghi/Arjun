@@ -18,16 +18,48 @@ app.use(express.json());
 // Path to persist JSON database
 const DB_PATH = path.join(process.cwd(), "db.json");
 
+interface TeacherAccount {
+  email: string;
+  name: string;
+  password?: string;
+  allowedGrades: number[];
+  isBlocked?: boolean;
+}
+
+interface AuditLog {
+  id: string;
+  user: string;
+  action: string;
+  timestamp: string;
+}
+
 interface DBStructure {
   students: Student[];
   announcements: Announcement[];
   chatMessages: ChatMessage[];
   assessments: Assessment[];
   weights: Record<string, number[]>;
+  teachers?: TeacherAccount[];
+  auditLogs?: AuditLog[];
+  adminPassword?: string;
 }
 
 // Default Weights Setup
 const defaultWeights = [5, 5, 10, 10, 10, 15, 15, 50, 5, 5, 10, 70, 30, 100];
+
+// Helper to log changes
+function logAction(db: DBStructure, userEmail: string | undefined, action: string) {
+  if (!db.auditLogs) db.auditLogs = [];
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    user: userEmail || "Anonymous/System",
+    action: action,
+    timestamp: new Date().toLocaleString()
+  });
+  if (db.auditLogs.length > 200) {
+    db.auditLogs = db.auditLogs.slice(0, 200);
+  }
+}
 
 // Default Assessments Generator Linker
 function generateDefaultAssessments(students: Student[]): Assessment[] {
@@ -101,9 +133,50 @@ function loadDatabase(): DBStructure {
         };
         upgraded = true;
       }
+      if (!parsed.teachers) {
+        parsed.teachers = [
+          {
+            email: "sita@rajarshigurukul.edu.np",
+            name: "Sita Sharma",
+            password: "RG-Sita-2026",
+            allowedGrades: [1, 2]
+          },
+          {
+            email: "ram@rajarshigurukul.edu.np",
+            name: "Ram Bahadur",
+            password: "RG-Ram-2026",
+            allowedGrades: [3, 4]
+          }
+        ];
+        upgraded = true;
+      }
+      if (!parsed.auditLogs) {
+        parsed.auditLogs = [
+          {
+            id: "log-1",
+            user: "system",
+            action: "Database initialized with secure registers.",
+            timestamp: new Date().toLocaleString()
+          }
+        ];
+        upgraded = true;
+      }
+      if (!parsed.adminPassword) {
+        parsed.adminPassword = "RG-Teacher-2026";
+        upgraded = true;
+      }
 
       if (upgraded) {
-        saveDatabase(parsed.students, parsed.announcements, parsed.chatMessages, parsed.assessments, parsed.weights);
+        saveDatabase(
+          parsed.students, 
+          parsed.announcements, 
+          parsed.chatMessages, 
+          parsed.assessments, 
+          parsed.weights,
+          parsed.teachers,
+          parsed.auditLogs,
+          parsed.adminPassword
+        );
       }
       return parsed as DBStructure;
     }
@@ -122,14 +195,37 @@ function loadDatabase(): DBStructure {
     "ICT": [...defaultWeights]
   };
 
+  const initialTeachers = [
+    {
+      email: "sita@rajarshigurukul.edu.np",
+      name: "Sita Sharma",
+      password: "RG-Sita-2026",
+      allowedGrades: [1, 2]
+    },
+    {
+      email: "ram@rajarshigurukul.edu.np",
+      name: "Ram Bahadur",
+      password: "RG-Ram-2026",
+      allowedGrades: [3, 4]
+    }
+  ];
+
   const data: DBStructure = { 
     students: defaultStudents, 
     announcements: defaultAnnouncements, 
     chatMessages: [],
     assessments: initialAssessments,
-    weights: initialWeights
+    weights: initialWeights,
+    teachers: initialTeachers,
+    auditLogs: [{
+      id: "log-1",
+      user: "system",
+      action: "Database created with default academic structure.",
+      timestamp: new Date().toLocaleString()
+    }],
+    adminPassword: "RG-Teacher-2026"
   };
-  saveDatabase(data.students, data.announcements, data.chatMessages, data.assessments, data.weights);
+  saveDatabase(data.students, data.announcements, data.chatMessages, data.assessments, data.weights, data.teachers, data.auditLogs, data.adminPassword);
   return data;
 }
 
@@ -139,10 +235,22 @@ function saveDatabase(
   announcements: Announcement[], 
   chatMessages: ChatMessage[],
   assessments: Assessment[],
-  weights: Record<string, number[]>
+  weights: Record<string, number[]>,
+  teachers?: TeacherAccount[],
+  auditLogs?: AuditLog[],
+  adminPassword?: string
 ) {
   try {
-    fs.writeFileSync(DB_PATH, JSON.stringify({ students, announcements, chatMessages, assessments, weights }, null, 2), "utf8");
+    fs.writeFileSync(DB_PATH, JSON.stringify({ 
+      students, 
+      announcements, 
+      chatMessages, 
+      assessments, 
+      weights, 
+      teachers, 
+      auditLogs, 
+      adminPassword 
+    }, null, 2), "utf8");
   } catch (error) {
     console.error("Failed to save to db.json", error);
   }
@@ -157,8 +265,11 @@ app.get("/api/students", (req, res) => {
 app.post("/api/students", (req, res) => {
   const updatedStudents = req.body as Student[];
   const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
+  
+  logAction(db, creator, `Synchronized student registers (Total active files: ${updatedStudents.length})`);
   db.students = updatedStudents;
-  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights);
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
   res.json({ success: true, count: updatedStudents.length });
 });
 
@@ -178,8 +289,11 @@ app.post("/api/announcements", (req, res) => {
   });
   
   const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
+  
+  logAction(db, creator, `Broadcasting classroom announcement: "${newAnn.title}" targeting grade selection.`);
   db.announcements = [newAnn, ...db.announcements];
-  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights);
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
   res.json(newAnn);
 });
 
@@ -199,8 +313,11 @@ app.post("/api/chat", (req, res) => {
   });
 
   const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
+  
+  logAction(db, creator, `Sent secure messaging line to student record ID: "${msg.studentId}"`);
   db.chatMessages.push(msg);
-  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights);
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
   res.json(msg);
 });
 
@@ -213,6 +330,7 @@ app.get("/api/assessments", (req, res) => {
 app.post("/api/assessments", (req, res) => {
   const incoming = req.body as Assessment;
   const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
   
   if (!incoming.id) {
     incoming.id = `asm-${Date.now()}`;
@@ -221,19 +339,27 @@ app.post("/api/assessments", (req, res) => {
   const existingIdx = db.assessments.findIndex(a => a.id === incoming.id);
   if (existingIdx !== -1) {
     db.assessments[existingIdx] = incoming;
+    logAction(db, creator, `Updated evaluation task: "${incoming.topic}" inside Grade ${incoming.grade} ${incoming.subject}`);
   } else {
     db.assessments.push(incoming);
+    logAction(db, creator, `Created evaluation task: "${incoming.topic}" inside Grade ${incoming.grade} ${incoming.subject}`);
   }
   
-  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights);
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
   res.json({ success: true, assessment: incoming });
 });
 
 app.delete("/api/assessments/:id", (req, res) => {
   const { id } = req.params;
   const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
+  
+  const existing = db.assessments.find(a => a.id === id);
+  const taskLabel = existing ? `"${existing.topic}"` : id;
+  
+  logAction(db, creator, `Deleted assessment record: ${taskLabel}`);
   db.assessments = db.assessments.filter(a => a.id !== id);
-  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights);
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
   res.json({ success: true });
 });
 
@@ -246,9 +372,148 @@ app.get("/api/weights", (req, res) => {
 app.post("/api/weights", (req, res) => {
   const { subject, weights } = req.body;
   const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
+  
+  logAction(db, creator, `Updated grading criteria weights scale for subject: "${subject}"`);
   if (!db.weights) db.weights = {};
   db.weights[subject] = weights;
-  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights);
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
+  res.json({ success: true });
+});
+
+// Secure endpoint for teacher accounts authorization check
+app.post("/api/auth/login", (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Academic email and password credentials are required." });
+  }
+
+  const db = loadDatabase();
+  const lowerEmail = email.toLowerCase().trim();
+
+  // 1. Admin Verification Flow
+  if (lowerEmail === "arjun@rajarshigurukul.edu.np") {
+    if (password === db.adminPassword) {
+      logAction(db, lowerEmail, "Administrator logged in securely.");
+      saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
+      return res.json({
+        success: true,
+        user: {
+          id: "T-Admin",
+          name: "Arjun Adhikari",
+          email: lowerEmail,
+          role: "admin",
+          allowedGrades: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        }
+      });
+    } else {
+      return res.status(401).json({ error: "Incorrect administrative authorization password." });
+    }
+  }
+
+  // 2. Verified Educators Lookup
+  const teacher = (db.teachers || []).find(t => t.email.toLowerCase() === lowerEmail);
+  if (teacher) {
+    if (teacher.isBlocked) {
+      return res.status(403).json({ error: "Access has been temporarily disabled by school administrator." });
+    }
+    if (teacher.password === password) {
+      logAction(db, lowerEmail, "Educator logged in securely.");
+      saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
+      return res.json({
+        success: true,
+        user: {
+          id: `T-${teacher.email.split('@')[0]}`,
+          name: teacher.name,
+          email: lowerEmail,
+          role: "teacher",
+          allowedGrades: teacher.allowedGrades || [1]
+        }
+      });
+    } else {
+      return res.status(401).json({ error: "Incorrect educator authentication password." });
+    }
+  }
+
+  return res.status(401).json({ error: "This email address is not registered in our Rajarshi database roster." });
+});
+
+// Teachers Management endpoints (Admin Only)
+app.get("/api/teachers", (req, res) => {
+  const db = loadDatabase();
+  res.json(db.teachers || []);
+});
+
+app.post("/api/teachers", (req, res) => {
+  const incoming = req.body;
+  const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
+
+  if (Array.isArray(incoming)) {
+    db.teachers = incoming;
+  } else {
+    if (!incoming.email) {
+      return res.status(400).json({ error: "Teacher email value is required." });
+    }
+    const lowerEmail = incoming.email.toLowerCase().trim();
+    if (!db.teachers) db.teachers = [];
+    
+    const existingIdx = db.teachers.findIndex(t => t.email.toLowerCase() === lowerEmail);
+    if (existingIdx !== -1) {
+      db.teachers[existingIdx] = {
+        ...db.teachers[existingIdx],
+        ...incoming,
+        email: lowerEmail
+      };
+      logAction(db, creator, `Configured educator access permissions for: ${lowerEmail}`);
+    } else {
+      db.teachers.push({
+        name: incoming.name || incoming.email.split('@')[0],
+        email: lowerEmail,
+        password: incoming.password || `RG-${Math.floor(1001 + Math.random() * 8999)}`,
+        allowedGrades: incoming.allowedGrades || [1],
+        isBlocked: !!incoming.isBlocked
+      });
+      logAction(db, creator, `Registered new educator roster account: ${lowerEmail}`);
+    }
+  }
+
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
+  res.json({ success: true, teachers: db.teachers });
+});
+
+app.delete("/api/teachers/:email", (req, res) => {
+  const { email } = req.params;
+  const db = loadDatabase();
+  const creator = req.headers["x-user-email"] as string || "System";
+
+  if (db.teachers) {
+    db.teachers = db.teachers.filter(t => t.email.toLowerCase() !== email.toLowerCase());
+    logAction(db, creator, `De-registered educator account: ${email}`);
+    saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
+  }
+  res.json({ success: true });
+});
+
+// Audit Change Logs retrieval (Admin Only)
+app.get("/api/audit-logs", (req, res) => {
+  const db = loadDatabase();
+  res.json(db.auditLogs || []);
+});
+
+// Update Administrative Password
+app.post("/api/auth/admin-password", (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const creator = req.headers["x-user-email"] as string || "Admin";
+  const db = loadDatabase();
+
+  if (currentPassword !== db.adminPassword) {
+    return res.status(400).json({ error: "Current administrative password does not match registers." });
+  }
+
+  db.adminPassword = newPassword;
+  logAction(db, creator, "Administrator credential verification password updated.");
+  saveDatabase(db.students, db.announcements, db.chatMessages, db.assessments, db.weights, db.teachers, db.auditLogs, db.adminPassword);
   res.json({ success: true });
 });
 
