@@ -186,8 +186,13 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
         setIsEditingTeacher(false);
         fetchTeachers();
       } else {
-        const data = await res.json();
-        setAdminError(data.error || 'Failed to update teacher configuration.');
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json();
+          setAdminError(data.error || 'Failed to update teacher configuration.');
+        } else {
+          setAdminError(`Failed to update teacher configuration due to non-JSON server response (Status ${res.status}).`);
+        }
       }
     } catch (err) {
       setAdminError('Network error updating teacher registry.');
@@ -268,13 +273,18 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
         })
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        setAdminPassMessage('Administrative password updated successfully!');
-        setCurrentAdminPassInput('');
-        setNewAdminPassInput('');
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (res.ok) {
+          setAdminPassMessage('Administrative password updated successfully!');
+          setCurrentAdminPassInput('');
+          setNewAdminPassInput('');
+        } else {
+          setAdminPassError(data.error || 'Failed to update administrative password.');
+        }
       } else {
-        setAdminPassError(data.error || 'Failed to update administrative password.');
+        setAdminPassError(`Server returned an unexpected response format (Status ${res.status}).`);
       }
     } catch (err) {
       setAdminPassError('Network error checking administrator credentials.');
@@ -873,11 +883,15 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
         })
       });
 
-      if (!response.ok) {
-        throw new Error('API server returned error state.');
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error(`The educational server returned an unexpected response format (Status ${response.status}).`);
       }
 
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'API server returned error state.');
+      }
       if (data.error) {
         throw new Error(data.error);
       }

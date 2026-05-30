@@ -19,9 +19,12 @@ export default function App() {
     try {
       setLoading(true);
       const res = await fetch('/api/students');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
         const data = await res.json();
         setStudents(data);
+      } else {
+        console.warn("Expected JSON response for students startup but got:", contentType);
       }
     } catch (err) {
       console.error("Failed to load student registers starting up", err);
