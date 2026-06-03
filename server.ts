@@ -1,9 +1,8 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { defaultStudents, defaultAnnouncements } from "./src/data/defaultStudents.js";
+import { defaultStudents, defaultAnnouncements } from "./src/data/defaultStudents";
 import { Student, Announcement, ChatMessage, Assessment } from "./src/types";
 
 // Setup dotenv to read .env
@@ -722,6 +721,7 @@ Keep your output to 2-3 short, highly focused, professional paragraphs maximum. 
 // Vite dev integration or static directory server
 async function bootServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
