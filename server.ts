@@ -16,7 +16,9 @@ const PORT = 3000;
 app.use(express.json());
 
 // Path to persist JSON database
-const DB_PATH = path.join(process.cwd(), "db.json");
+const DB_PATH = process.env.VERCEL
+  ? path.join("/tmp", "db.json")
+  : path.join(process.cwd(), "db.json");
 
 interface TeacherAccount {
   email: string;
@@ -112,6 +114,16 @@ function generateDefaultAssessments(students: Student[]): Assessment[] {
 // Helper to load current database state
 function loadDatabase(): DBStructure {
   try {
+    if (process.env.VERCEL && !fs.existsSync(DB_PATH)) {
+      const sourcePath = path.join(process.cwd(), "db.json");
+      if (fs.existsSync(sourcePath)) {
+        try {
+          fs.copyFileSync(sourcePath, DB_PATH);
+        } catch (copyErr) {
+          console.error("Failed to copy db.json to /tmp", copyErr);
+        }
+      }
+    }
     if (fs.existsSync(DB_PATH)) {
       const raw = fs.readFileSync(DB_PATH, "utf8");
       const parsed = JSON.parse(raw);
@@ -728,4 +740,8 @@ async function bootServer() {
   });
 }
 
-bootServer();
+if (!process.env.VERCEL) {
+  bootServer();
+}
+
+export default app;
