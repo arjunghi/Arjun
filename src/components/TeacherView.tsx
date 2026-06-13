@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Student, SubjectGrade, Announcement, Assessment } from '../types';
 import { initAuth, googleSignIn, googleLogout } from '../lib/firebaseAuth';
+import { apiService, isAppsScript } from '../lib/apiService';
 
 interface TeacherViewProps {
   teacherData: any;
@@ -77,6 +78,11 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [cdcTermFilter, setCdcTermFilter] = useState<'Spring' | 'Fall' | 'Final' | 'All'>('Spring');
   const [cdcActiveTab, setCdcActiveTab] = useState<'entries' | 'gradesheet'>('gradesheet');
+
+  // Apps Script dynamic state loaders
+  const [availableSubjectsList, setAvailableSubjectsList] = useState<string[]>(['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'ICT']);
+  const [appsScriptCdcRows, setAppsScriptCdcRows] = useState<any[] | null>(null);
+  const [isCdcLoading, setIsCdcLoading] = useState(false);
   
   // Custom column form variables
   const [isCdcEdit, setIsCdcEdit] = useState(false);
@@ -105,6 +111,44 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
 
   // Initial Data Loads
   React.useEffect(() => {
+    // Dynamic subject lists
+    apiService.getSubjectSheets().then(list => {
+      if (list && list.length > 0) {
+        setAvailableSubjectsList(list);
+      }
+    });
+  }, []);
+
+  // Sync GAS Gradesheet records
+  React.useEffect(() => {
+    if (isAppsScript) {
+      setIsCdcLoading(true);
+      apiService.fetchCDCGradesheetCompiler(selectedSubject, cdcTermFilter, selectedSection)
+        .then(data => {
+          if (data && data.rows) {
+            setAppsScriptCdcRows(data.rows.map(r => ({
+              id: `G1-S${r.sn}`,
+              sn: r.sn,
+              name: r.name,
+              section: r.section,
+              scoresArray: r.calculatedScores
+            })));
+          }
+        })
+        .catch(err => console.error("Failed to load GAS compiled matrix", err))
+        .finally(() => setIsCdcLoading(false));
+    } else {
+      setAppsScriptCdcRows(null);
+    }
+  }, [selectedSubject, cdcTermFilter, selectedSection]);
+
+  // Live CDC triggers
+  React.useEffect(() => {
+    fetchAssessments();
+    fetchWeights();
+  }, [selectedSubject, cdcTermFilter, selectedSection]);
+
+  React.useEffect(() => {
     fetchAssessments();
     fetchWeights();
     fetchCalendar();
@@ -128,12 +172,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const fetchTeachers = async () => {
     try {
       setTeacherChangesLoading(true);
-      const res = await fetch('/api/teachers');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        setTeachersList(data);
-      }
+      const data = await apiService.fetchTeachers();
+      setTeachersList(data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -144,12 +184,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const fetchAuditLogs = async () => {
     try {
       setAuditLogsLoading(true);
-      const res = await fetch('/api/audit-logs');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        setAuditLogsList(data);
-      }
+      const data = await apiService.fetchAuditLogs();
+      setAuditLogsList(data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -163,39 +199,22 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
 
     try {
       setTeacherChangesLoading(true);
-      const res = await fetch('/api/teachers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-email': teacherData.email
-        },
-        body: JSON.stringify({
-          email: teacherEmailInput.trim(),
-          name: teacherNameInput.trim(),
-          password: teacherPasswordInput.trim() || undefined,
-          allowedGrades: teacherAllowedGrades
-        })
-      });
+      await apiService.saveTeacher({
+        email: teacherEmailInput.trim(),
+        name: teacherNameInput.trim(),
+        password: teacherPasswordInput.trim() || undefined,
+        allowedGrades: teacherAllowedGrades
+      }, teacherData.email);
 
-      if (res.ok) {
-        setAdminSuccess(`Successfully configured educator permission matrix for ${teacherEmailInput}!`);
-        setTeacherEmailInput('');
-        setTeacherNameInput('');
-        setTeacherPasswordInput('');
-        setTeacherAllowedGrades([1]);
-        setIsEditingTeacher(false);
-        fetchTeachers();
-      } else {
-        const contentType = res.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const data = await res.json();
-          setAdminError(data.error || 'Failed to update teacher configuration.');
-        } else {
-          setAdminError(`Failed to update teacher configuration due to non-JSON server response (Status ${res.status}).`);
-        }
-      }
-    } catch (err) {
-      setAdminError('Network error updating teacher registry.');
+      setAdminSuccess(`Successfully configured educator permission matrix for ${teacherEmailInput}!`);
+      setTeacherEmailInput('');
+      setTeacherNameInput('');
+      setTeacherPasswordInput('');
+      setTeacherAllowedGrades([1]);
+      setIsEditingTeacher(false);
+      fetchTeachers();
+    } catch (err: any) {
+      setAdminError(err.message || 'Failed to update teacher configuration.');
     } finally {
       setTeacherChangesLoading(false);
     }
@@ -206,17 +225,9 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
 
     try {
       setTeacherChangesLoading(true);
-      const res = await fetch(`/api/teachers/${encodeURIComponent(emailToDelete)}`, {
-        method: 'DELETE',
-        headers: {
-          'x-user-email': teacherData.email
-        }
-      });
-
-      if (res.ok) {
-        setAdminSuccess(`Educator account ${emailToDelete} removed.`);
-        fetchTeachers();
-      }
+      await apiService.deleteTeacher(emailToDelete, teacherData.email);
+      setAdminSuccess(`Educator account ${emailToDelete} removed.`);
+      fetchTeachers();
     } catch (err) {
       console.error(err);
     } finally {
@@ -227,22 +238,13 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const handleToggleBlockTeacher = async (teacher: any) => {
     try {
       setTeacherChangesLoading(true);
-      const res = await fetch('/api/teachers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-email': teacherData.email
-        },
-        body: JSON.stringify({
-          email: teacher.email,
-          isBlocked: !teacher.isBlocked
-        })
-      });
+      await apiService.saveTeacher({
+        email: teacher.email,
+        isBlocked: !teacher.isBlocked
+      }, teacherData.email);
 
-      if (res.ok) {
-        setAdminSuccess(`Blocked status for ${teacher.email} toggled successfully!`);
-        fetchTeachers();
-      }
+      setAdminSuccess(`Blocked status for ${teacher.email} toggled successfully!`);
+      fetchTeachers();
     } catch (err) {
       console.error(err);
     } finally {
@@ -261,44 +263,20 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
     }
 
     try {
-      const res = await fetch('/api/auth/admin-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-email': teacherData.email
-        },
-        body: JSON.stringify({
-          currentPassword: currentAdminPassInput,
-          newPassword: newAdminPassInput
-        })
-      });
-
-      const contentType = res.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        if (res.ok) {
-          setAdminPassMessage('Administrative password updated successfully!');
-          setCurrentAdminPassInput('');
-          setNewAdminPassInput('');
-        } else {
-          setAdminPassError(data.error || 'Failed to update administrative password.');
-        }
-      } else {
-        setAdminPassError(`Server returned an unexpected response format (Status ${res.status}).`);
-      }
-    } catch (err) {
-      setAdminPassError('Network error checking administrator credentials.');
+      // Direct pass validator
+      await apiService.updateAdminPassword(currentAdminPassInput, newAdminPassInput);
+      setAdminPassMessage('Administrative password updated successfully!');
+      setCurrentAdminPassInput('');
+      setNewAdminPassInput('');
+    } catch (err: any) {
+      setAdminPassError(err.message || 'Network error checking administrator credentials.');
     }
   };
 
   const fetchAssessments = async () => {
     try {
-      const res = await fetch('/api/assessments');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        setAssessments(data);
-      }
+      const data = await apiService.fetchAssessments(selectedSubject, cdcTermFilter, selectedSection);
+      setAssessments(data);
     } catch (e) {
       console.error("Failed to load assessments", e);
     }
@@ -306,16 +284,12 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
 
   const fetchWeights = async () => {
     try {
-      const res = await fetch('/api/weights');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        setWeights(data);
-        if (data[selectedSubject]) {
-          setEditWeights(data[selectedSubject]);
-        } else {
-          setEditWeights([5, 5, 10, 10, 10, 15, 15, 50, 5, 5, 10, 70, 30, 100]);
-        }
+      const data = await apiService.fetchWeights(selectedSubject);
+      setWeights(data);
+      if (data[selectedSubject]) {
+        setEditWeights(data[selectedSubject]);
+      } else {
+        setEditWeights([5, 5, 10, 10, 10, 15, 15, 50, 5, 5, 10, 70, 30, 100]);
       }
     } catch (e) {
       console.error("Failed to load weights", e);
@@ -325,12 +299,8 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
   const fetchCalendar = async () => {
     try {
       setCalendarLoading(true);
-      const res = await fetch('/api/calendar');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        setCalendarData(data);
-      }
+      const data = await apiService.fetchCalendar();
+      setCalendarData(data);
     } catch (e) {
       console.error("Failed to fetch calendar", e);
     } finally {
@@ -695,52 +665,55 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
       return;
     }
 
-    // Prepare complete record
-    const record: Assessment = {
-      id: activeCdcColId || `asm-${Date.now()}`,
-      grade: selectedGrade,
-      subject: selectedSubject,
-      term: cdcFormTerm,
-      date: cdcFormDate,
-      topic: cdcFormTopic,
-      task: cdcFormTask,
-      fullMarks: cdcFormFullMarks,
-      scores: cdcFormScores
-    };
-
     try {
-      const res = await fetch('/api/assessments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(record)
-      });
-      if (res.ok) {
-        await fetchAssessments();
-        // Reset Form
-        setIsCdcEdit(false);
-        setActiveCdcColId(null);
-        setCdcFormTopic('');
-        setCdcFormFullMarks(10);
-        setCdcFormScores({});
-        alert("Evaluation column records synchronized successfully!");
+      let colNumToSend: string | undefined = undefined;
+      if (activeCdcColId && activeCdcColId.startsWith("col-")) {
+        colNumToSend = activeCdcColId.substring("col-".length);
       }
-    } catch (e) {
+
+      await apiService.saveAssessment({
+        targetSheet: selectedSubject,
+        task: cdcFormTask,
+        topic: cdcFormTopic,
+        fullMarks: cdcFormFullMarks,
+        date: cdcFormDate,
+        term: cdcFormTerm,
+        section: selectedSection === 'all' ? 'All' : selectedSection,
+        scores: cdcFormScores,
+        isEdit: !!activeCdcColId,
+        colNum: colNumToSend
+      });
+
+      await fetchAssessments();
+      // Reset Form
+      setIsCdcEdit(false);
+      setActiveCdcColId(null);
+      setCdcFormTopic('');
+      setCdcFormFullMarks(10);
+      setCdcFormScores({});
+      alert("Evaluation column records synchronized successfully!");
+    } catch (e: any) {
       console.error("Failed to sync CDC column", e);
+      alert("Failed to synchronize column: " + (e.message || e));
     }
   };
 
   const handleDeleteCdcCol = async (id: string) => {
     if (!window.confirm("Are you sure you want to permanently delete this evaluation column record? This cannot be undone.")) return;
     try {
-      const res = await fetch(`/api/assessments/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        await fetchAssessments();
-        alert("Record deleted.");
+      let absoluteColNum = 0;
+      if (id.startsWith("col-")) {
+        absoluteColNum = parseInt(id.substring("col-".length)) || 0;
+      } else if (id.startsWith("asm-")) {
+        absoluteColNum = parseInt(id.substring("asm-".length)) || 0;
       }
+
+      await apiService.deleteAssessment(selectedSubject, absoluteColNum);
+      await fetchAssessments();
+      alert("Record deleted.");
     } catch (e) {
       console.error(e);
+      alert("Failed to delete column.");
     }
   };
 
@@ -757,22 +730,13 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
 
   const handleSaveWeightsMatrix = async () => {
     try {
-      const res = await fetch('/api/weights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: selectedSubject,
-          weights: editWeights
-        })
-      });
-      if (res.ok) {
-        setWeightsSuccess("Subject CDC Scale Weights Configured Successfully!");
-        setWeights(prev => ({
-          ...prev,
-          [selectedSubject]: editWeights
-        }));
-        setTimeout(() => setWeightsSuccess(''), 3000);
-      }
+      await apiService.saveWeights(selectedSubject, editWeights);
+      setWeightsSuccess("Subject CDC Scale Weights Configured Successfully!");
+      setWeights(prev => ({
+        ...prev,
+        [selectedSubject]: editWeights
+      }));
+      setTimeout(() => setWeightsSuccess(''), 3000);
     } catch (e) {
       setWeightsError("Internal network error.");
       setTimeout(() => setWeightsError(''), 3000);
@@ -1767,7 +1731,7 @@ export default function TeacherView({ teacherData, students, onUpdateStudents, o
                   });
                 };
 
-                const cdcRows = getCdcCalculatedRowsLocal(selectedSubject, cdcTermFilter);
+                const cdcRows = appsScriptCdcRows || getCdcCalculatedRowsLocal(selectedSubject, cdcTermFilter);
                 const totalWeightsArray = weights[selectedSubject] || [5, 5, 10, 10, 10, 15, 15, 50, 5, 5, 10, 70, 30, 100];
 
                 const printTable = () => {

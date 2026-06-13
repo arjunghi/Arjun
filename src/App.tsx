@@ -4,6 +4,7 @@ import TeacherView from './components/TeacherView';
 import StudentView from './components/StudentView';
 import { Student } from './types';
 import { ShieldCheck, Plus, GraduationCap, Loader2 } from 'lucide-react';
+import { apiService } from './lib/apiService';
 
 export default function App() {
   const [session, setSession] = useState<{ role: 'teacher' | 'student'; payload: any } | null>(null);
@@ -18,14 +19,8 @@ export default function App() {
   const fetchStudents = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/students');
-      const contentType = res.headers.get('content-type');
-      if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
-        setStudents(data);
-      } else {
-        console.warn("Expected JSON response for students startup but got:", contentType);
-      }
+      const data = await apiService.fetchStudents();
+      setStudents(data);
     } catch (err) {
       console.error("Failed to load student registers starting up", err);
     } finally {
@@ -50,14 +45,10 @@ export default function App() {
     }
 
     try {
-      await fetch('/api/students', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-email': session ? session.payload.email : 'System'
-        },
-        body: JSON.stringify(updatedList)
-      });
+      await apiService.updateStudents(
+        updatedList,
+        session ? session.payload.email : 'System'
+      );
     } catch (err) {
       console.error("Failed to save and sync grade book updates server-side", err);
     }

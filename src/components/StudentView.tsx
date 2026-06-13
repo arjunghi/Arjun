@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Student, Announcement, ChatMessage } from '../types';
 import { calculateGradeAndGPA } from './TeacherView';
+import { apiService } from '../lib/apiService';
 
 interface StudentViewProps {
   studentData: Student;
@@ -31,36 +32,23 @@ export default function StudentView({ studentData, onLogout }: StudentViewProps)
 
   // Fetch announcements, chats and calendar
   useEffect(() => {
-    const safeJson = (res: Response) => {
-      const contentType = res.headers.get('content-type');
-      if (!res.ok || !contentType || !contentType.includes('application/json')) {
-        throw new Error('Invalid response content-type or status.');
-      }
-      return res.json();
-    };
-
-    fetch('/api/announcements')
-      .then(safeJson)
+    apiService.fetchAnnouncements()
       .then(data => setAnnouncements(data))
       .catch(err => console.warn('Announcements fetch deferred:', err.message));
 
-    fetch(`/api/chat/${studentData.id}`)
-      .then(safeJson)
+    apiService.fetchChat(studentData.id)
       .then(data => setMessages(data))
       .catch(err => console.warn('Chat fetch deferred:', err.message));
 
-    fetch('/api/calendar')
-      .then(safeJson)
+    apiService.fetchCalendar()
       .then(data => setCalendarData(data))
       .catch(err => console.warn('Calendar fetch deferred:', err.message));
 
-    fetch('/api/assessments')
-      .then(safeJson)
+    apiService.fetchAssessments()
       .then(data => setAssessments(data))
       .catch(err => console.warn('Assessments fetch deferred:', err.message));
 
-    fetch('/api/weights')
-      .then(safeJson)
+    apiService.fetchWeights()
       .then(data => setWeights(data))
       .catch(err => console.warn('Weights fetch deferred:', err.message));
   }, [studentData.id]);
@@ -94,23 +82,19 @@ export default function StudentView({ studentData, onLogout }: StudentViewProps)
     const simulatedCipher = "E2E_CIPHER_NODE::" + btoa(unescape(encodeURIComponent(originalText)));
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderId: 'Parent-' + studentData.id,
-          senderName: 'Parent of ' + studentData.name,
-          senderRole: 'parent',
-          studentId: studentData.id,
-          encryptedText: simulatedCipher,
-          decryptedText: originalText // Stored locally on client for rendering own messages
-        })
-      });
+      const payload: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        senderId: 'Parent-' + studentData.id,
+        senderName: 'Parent of ' + studentData.name,
+        senderRole: 'parent',
+        studentId: studentData.id,
+        encryptedText: simulatedCipher,
+        decryptedText: originalText,
+        timestamp: new Date().toLocaleTimeString()
+      };
 
-      if (res.ok) {
-        const msg = await res.json();
-        setMessages(prev => [...prev, msg]);
-      }
+      await apiService.saveChat(payload);
+      setMessages(prev => [...prev, payload]);
     } catch (err) {
       console.error("Encrypt and sync failed", err);
     } finally {
